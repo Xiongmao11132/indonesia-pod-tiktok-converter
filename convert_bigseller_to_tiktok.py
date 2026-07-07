@@ -1069,9 +1069,35 @@ def expand_rows_to_target_sizes(
     target_sizes: list[str],
     args: argparse.Namespace,
 ) -> list[dict[str, object]]:
+    def fallback_color_groups() -> list[dict[str, object]]:
+        allowed_colors = parse_color_codes(args.allowed_colors)
+        for row in rows:
+            for key in ("variation_value_1", "variation_value_2"):
+                code = normalize_color_code(row.get(SOURCE_COLUMNS[key]))
+                if code in allowed_colors:
+                    return [{"code": code, "label": "", "source_matched": True}]
+        return [
+            {"code": "BK", "label": COLOR_DISPLAY.get("BK", "Black"), "source_matched": False},
+            {"code": "WH", "label": COLOR_DISPLAY.get("WH", "White"), "source_matched": False},
+        ]
+
     size_key = detect_size_key(rows)
     if not size_key:
-        return rows
+        expanded = []
+        for color_group in fallback_color_groups():
+            for size in target_sizes:
+                new_row = dict(rows[0])
+                new_row[SOURCE_COLUMNS["variation_name_1"]] = "Warna"
+                new_row[SOURCE_COLUMNS["variation_value_1"]] = (
+                    as_text(color_group["label"]) or COLOR_DISPLAY.get(as_text(color_group["code"]), as_text(color_group["code"]))
+                )
+                new_row[SOURCE_COLUMNS["variation_name_2"]] = "Ukuran"
+                new_row[SOURCE_COLUMNS["variation_value_2"]] = size
+                new_row["_sku_color_code"] = color_group["code"]
+                new_row["_sku_size"] = size
+                new_row["_sku_variant_image_allowed"] = color_group["source_matched"]
+                expanded.append(new_row)
+        return expanded
 
     size_header = SOURCE_COLUMNS[size_key]
     size_name_header = SOURCE_COLUMNS[paired_variation_key(size_key, "name")]
@@ -1090,17 +1116,22 @@ def expand_rows_to_target_sizes(
             if color_code not in allowed_colors or color_code in seen_colors:
                 continue
             seen_colors.add(color_code)
-            groups.append((color_code, as_text(row.get(other_header)) or COLOR_DISPLAY.get(color_code, color_code)))
+            groups.append(
+                {
+                    "code": color_code,
+                    "label": as_text(row.get(other_header)) or COLOR_DISPLAY.get(color_code, color_code),
+                    "source_matched": True,
+                }
+            )
         if not groups:
-            inferred, _ = infer_group_color_code(rows, args)
-            groups = [(inferred, "")]
+            groups = fallback_color_groups()
             other_is_color = False
     else:
-        inferred, _ = infer_group_color_code(rows, args)
-        groups = [(inferred, "")]
+        groups = fallback_color_groups()
 
     expanded = []
-    for color_code, other_value in groups:
+    for color_group in groups:
+        color_code = as_text(color_group["code"])
         candidates = [
             row
             for row in rows
@@ -1119,8 +1150,9 @@ def expand_rows_to_target_sizes(
             new_row[size_name_header] = as_text(new_row.get(size_name_header)) or "Ukuran"
             new_row["_sku_color_code"] = color_code
             new_row["_sku_size"] = size
+            new_row["_sku_variant_image_allowed"] = color_group["source_matched"]
             if other_is_color:
-                new_row[other_header] = other_value or COLOR_DISPLAY.get(color_code, color_code)
+                new_row[other_header] = as_text(color_group["label"]) or COLOR_DISPLAY.get(color_code, color_code)
                 new_row[other_name_header] = as_text(new_row.get(other_name_header)) or "Warna"
             else:
                 new_row[other_header] = None
@@ -1144,7 +1176,9 @@ def base_template_row(
 ) -> dict[str, object]:
     variation_name_1 = as_text(row.get(SOURCE_COLUMNS["variation_name_1"]))
     variation_name_2 = as_text(row.get(SOURCE_COLUMNS["variation_name_2"]))
-    variant_image = as_text(row.get(SOURCE_COLUMNS["variant_image_1"])) or product_images[0]
+    variant_image = ""
+    if row.get("_sku_variant_image_allowed") is not False:
+        variant_image = as_text(row.get(SOURCE_COLUMNS["variant_image_1"]))
 
     output = {
         "category": args.category,

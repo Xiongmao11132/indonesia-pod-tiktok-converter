@@ -40,7 +40,6 @@ function renderProducts(groups) {
   for (const group of groups) {
     choices[group.productNo] = {
       side: "P",
-      color: group.inferredColor === "WH" ? "WH" : "BK",
     };
 
     const card = document.createElement("article");
@@ -65,12 +64,8 @@ function renderProducts(groups) {
             <label><input type="radio" name="side-${group.productNo}" value="PR"> PR</label>
           </div>
         </div>
-        <div>
-          <div class="field-label">无颜色选项时默认底色</div>
-          <select data-color="${group.productNo}">
-            <option value="BK" ${choices[group.productNo].color === "BK" ? "selected" : ""}>BK 黑色</option>
-            <option value="WH" ${choices[group.productNo].color === "WH" ? "selected" : ""}>WH 白色</option>
-          </select>
+        <div class="auto-note">
+          无颜色选项时自动生成 BK 黑色 + WH 白色
         </div>
       </div>
     `;
@@ -79,9 +74,6 @@ function renderProducts(groups) {
       radio.addEventListener("change", () => {
         choices[group.productNo].side = radio.value;
       });
-    });
-    card.querySelector(`[data-color="${group.productNo}"]`).addEventListener("change", (event) => {
-      choices[group.productNo].color = event.target.value;
     });
     productsEl.append(card);
   }

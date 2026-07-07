@@ -181,6 +181,16 @@ select {
   font-size: 14px;
 }
 
+.auto-note {
+  padding: 10px 12px;
+  border: 1px solid #d5dce7;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475467;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .downloads {
   display: flex;
   gap: 10px;

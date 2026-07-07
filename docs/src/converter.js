@@ -246,29 +246,43 @@ function orderedUniqueValues(rows, sourceKey) {
   return values;
 }
 
-function inferGroupColorCode(rows, fallbackColor) {
+function inferGroupColorCode(rows) {
   for (const row of rows) {
-    for (const key of ["variation_value_1", "variation_value_2", "name"]) {
+    for (const key of ["variation_value_1", "variation_value_2"]) {
       const code = normalizeColorCode(row[SOURCE_COLUMNS[key]]);
       if (code === "BK" || code === "WH") return code;
     }
   }
-  return fallbackColor === "WH" ? "WH" : "BK";
+  return "";
 }
 
-function expandRowsToTargetSizes(rows, fallbackColor) {
+function fallbackColorGroups(rows) {
+  const detected = inferGroupColorCode(rows);
+  if (detected) return [{ code: detected, label: "", sourceMatched: true }];
+  return [
+    { code: "BK", label: COLOR_DISPLAY.BK, sourceMatched: false },
+    { code: "WH", label: COLOR_DISPLAY.WH, sourceMatched: false },
+  ];
+}
+
+function expandRowsToTargetSizes(rows) {
   const sizeKey = detectSizeKey(rows);
   if (!sizeKey) {
-    return TARGET_SIZES.map((size) => {
-      const next = { ...rows[0] };
-      next[SOURCE_COLUMNS.variation_name_1] = "Ukuran";
-      next[SOURCE_COLUMNS.variation_value_1] = size;
-      next[SOURCE_COLUMNS.variation_name_2] = "";
-      next[SOURCE_COLUMNS.variation_value_2] = "";
-      next._sku_size = size;
-      next._sku_color_code = inferGroupColorCode(rows, fallbackColor);
-      return next;
-    });
+    const expanded = [];
+    for (const group of fallbackColorGroups(rows)) {
+      for (const size of TARGET_SIZES) {
+        const next = { ...rows[0] };
+        next[SOURCE_COLUMNS.variation_name_1] = "Warna";
+        next[SOURCE_COLUMNS.variation_value_1] = group.label || COLOR_DISPLAY[group.code] || group.code;
+        next[SOURCE_COLUMNS.variation_name_2] = "Ukuran";
+        next[SOURCE_COLUMNS.variation_value_2] = size;
+        next._sku_size = size;
+        next._sku_color_code = group.code;
+        next._sku_variant_image_allowed = group.sourceMatched;
+        expanded.push(next);
+      }
+    }
+    return expanded;
   }
 
   const sizeHeader = SOURCE_COLUMNS[sizeKey];
@@ -286,21 +300,19 @@ function expandRowsToTargetSizes(rows, fallbackColor) {
       const colorCode = normalizeColorCode(row[otherHeader]);
       if (!["BK", "WH"].includes(colorCode) || seenColors.has(colorCode)) continue;
       seenColors.add(colorCode);
-      groups.push([colorCode, text(row[otherHeader]) || COLOR_DISPLAY[colorCode]]);
+      groups.push({ code: colorCode, label: text(row[otherHeader]) || COLOR_DISPLAY[colorCode], sourceMatched: true });
     }
     if (!groups.length) {
       otherIsColor = false;
-      const colorCode = inferGroupColorCode(rows, fallbackColor);
-      groups = [[colorCode, ""]];
+      groups = fallbackColorGroups(rows);
     }
   } else {
-    const colorCode = inferGroupColorCode(rows, fallbackColor);
-    groups = [[colorCode, ""]];
+    groups = fallbackColorGroups(rows);
   }
 
   const expanded = [];
-  for (const [colorCode, otherValue] of groups) {
-    const candidates = rows.filter((row) => !otherIsColor || normalizeColorCode(row[otherHeader]) === colorCode);
+  for (const group of groups) {
+    const candidates = rows.filter((row) => !otherIsColor || normalizeColorCode(row[otherHeader]) === group.code);
     const validCandidates = candidates.filter((row) => normalizeSize(row[sizeHeader]));
     const fallback = validCandidates[0] || candidates[0] || rows[0];
 
@@ -310,9 +322,10 @@ function expandRowsToTargetSizes(rows, fallbackColor) {
       next[sizeHeader] = size;
       next[sizeNameHeader] = text(next[sizeNameHeader]) || "Ukuran";
       next._sku_size = size;
-      next._sku_color_code = colorCode;
+      next._sku_color_code = group.code;
+      next._sku_variant_image_allowed = group.sourceMatched;
       if (otherIsColor) {
-        next[otherHeader] = otherValue || COLOR_DISPLAY[colorCode] || colorCode;
+        next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
         next[otherNameHeader] = text(next[otherNameHeader]) || "Warna";
       } else {
         next[otherHeader] = "";
@@ -350,7 +363,7 @@ function extraSku(skuDate, groupIndex) {
 }
 
 function templateRow(row, productImages, description, skuDate, groupIndex, side) {
-  const variantImage = text(row[SOURCE_COLUMNS.variant_image_1]) || productImages[0];
+  const variantImage = row._sku_variant_image_allowed === false ? "" : text(row[SOURCE_COLUMNS.variant_image_1]);
   return {
     category: "Men's Tops/T-shirts",
     brand: "No brand",
@@ -444,7 +457,6 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
     const firstRow = group.rows[0];
     const choice = choices[productNo] || {};
     const side = choice.side === "PR" ? "PR" : "P";
-    const fallbackColor = choice.color === "WH" ? "WH" : "BK";
     const originalImages = sourceImages(firstRow);
     if (!originalImages[0]) {
       throw new Error(`商品 ${productNo} 缺少产品图 1`);
@@ -455,7 +467,7 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
       text(firstRow[SOURCE_COLUMNS.long_description]) || text(firstRow[SOURCE_COLUMNS.short_description]),
       assets.detailUrls,
     );
-    const skuRows = expandRowsToTargetSizes(group.rows, fallbackColor);
+    const skuRows = expandRowsToTargetSizes(group.rows);
 
     reviewRows.push({
       product_no: productNo,
@@ -506,7 +518,7 @@ function groupRows(rows) {
       sourceUrl: text(firstRow[SOURCE_COLUMNS.source_url]),
       image: sourceImages(firstRow)[0],
       thumbs,
-      inferredColor: inferGroupColorCode(groupRowsValue, "BK"),
+      inferredColor: inferGroupColorCode(groupRowsValue),
     };
   });
 }
