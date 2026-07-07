@@ -1,0 +1,97 @@
+name: Convert BigSeller Excel
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_file:
+        description: "BigSeller Excel path in this repo"
+        required: true
+        default: "input/bigseller.xlsx"
+      sku_date:
+        description: "SKU date, for example 20260707. Leave empty to use today's date."
+        required: false
+        default: ""
+      print_side_override:
+        description: "Optional PR/P override CSV path"
+        required: false
+        default: ""
+      image_print_side_detect:
+        description: "Use SKU image recognition for P/PR"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Hong_Kong
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Convert Excel
+        env:
+          SOURCE_FILE: ${{ inputs.source_file }}
+          SKU_DATE: ${{ inputs.sku_date }}
+          PRINT_SIDE_OVERRIDE: ${{ inputs.print_side_override }}
+          IMAGE_PRINT_SIDE_DETECT: ${{ inputs.image_print_side_detect }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$SOURCE_FILE" ]; then
+            echo "::error::Cannot find BigSeller Excel: $SOURCE_FILE"
+            exit 1
+          fi
+
+          IMAGE_FLAG="--image-print-side-detect"
+          if [ "$IMAGE_PRINT_SIDE_DETECT" = "false" ]; then
+            IMAGE_FLAG="--no-image-print-side-detect"
+          fi
+
+          OVERRIDE_ARGS=()
+          if [ -n "$PRINT_SIDE_OVERRIDE" ] && [ -f "$PRINT_SIDE_OVERRIDE" ]; then
+            OVERRIDE_ARGS=(--print-side-override "$PRINT_SIDE_OVERRIDE")
+          else
+            OVERRIDE_ARGS=(--print-side-override "outputs/no_override.csv")
+          fi
+
+          SKU_ARGS=()
+          if [ -n "$SKU_DATE" ]; then
+            SKU_ARGS=(--sku-date "$SKU_DATE")
+          fi
+
+          mkdir -p outputs
+          python convert_bigseller_to_tiktok.py \
+            --source "$SOURCE_FILE" \
+            --template "Bothplatforms_Menswear & Underwear_20260706_template.xlsx" \
+            --asset-manifest "config/assets_r2.json" \
+            --output "outputs/tiktokshop_import_${GITHUB_RUN_NUMBER}.xlsx" \
+            --print-side-review "outputs/tiktokshop_import_${GITHUB_RUN_NUMBER}_print_side_review.csv" \
+            "${OVERRIDE_ARGS[@]}" \
+            "${SKU_ARGS[@]}" \
+            "$IMAGE_FLAG"
+
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktokshop-import-${{ github.run_number }}
+          path: |
+            outputs/*.xlsx
+            outputs/*_print_side_review.csv
+          retention-days: 14

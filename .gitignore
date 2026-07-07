@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+outputs/
+.tmp_*/
+.tmp_*.py
+.DS_Store
+scraped_product_*.xlsx
+input/*.xls
+input/*.xlsx
+!input/.gitkeep
