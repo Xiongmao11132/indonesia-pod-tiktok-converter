@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BigSeller 转 TikTok 上传表</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./src/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar">
+        <div>
+          <h1>BigSeller 转 TikTok 上传表</h1>
+          <p id="summary">选择 BigSeller Excel 后，为每个商品确认 P/PR。</p>
+        </div>
+        <div class="actions">
+          <label class="file-button">
+            <span>选择 Excel</span>
+            <input id="sourceFile" type="file" accept=".xlsx,.xls">
+          </label>
+          <button id="generateButton" type="button" disabled>生成上传表</button>
+        </div>
+      </section>
+
+      <section id="products" class="products"></section>
+
+      <section id="downloads" class="downloads" hidden>
+        <a id="xlsxDownload" download>下载 TikTok 上传表</a>
+        <a id="reviewDownload" download>下载 PR 复核表</a>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

@@ -3,8 +3,8 @@ r"""
 把 BigSeller 采集导出的 Excel 转成 TikTok Shop 批量上传模板。
 
 默认规则：
-- 商品图 1、商品图 2 沿用 BigSeller 链接。
-- 商品图 3-9 替换为 D:\desk\印尼POD\主图 里的 7 张图。
+- 商品图 1 沿用 BigSeller 链接。
+- 商品图 2-9 替换为 D:\desk\印尼POD\主图 里的 7 张图 + 尺码表。
 - 详情 HTML 保留原文字，把原 <img> 替换为 D:\desk\印尼POD\详情 里的全部图片。
 - 每个 SKU 库存 999，包裹重量 210g，长宽高 25/22/4cm。
 - 正常 SKU 尺码统一补齐为 S/M/L/XL/XXL/XXXL，自动规范 2XL/3XL 等写法。
@@ -54,6 +54,7 @@ EXTRA_VARIATION_VALUE_1 = "Pengiriman kilat 48 jam"
 EXTRA_VARIATION_VALUE_2 = "Jangan beli"
 DELIVERY_TEXT = "The delivery options for this product are the same as the delivery options for the shop. "
 DEFAULT_SIZE_CHART_IMAGE = DEFAULT_DETAIL_IMAGE_DIR / "主8尺码表.png"
+MAIN_IMAGE_REPLACEMENT_COUNT = 8
 DEFAULT_TARGET_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"]
 SIZE_ALIASES = {
     "S": "S",
@@ -1269,10 +1270,10 @@ def build_output_rows(
             }
         )
         original_images = source_images(first_row)
-        if not original_images[0] or not original_images[1]:
-            raise ValueError(f"源表第 {first_row['_row_index']} 行缺少产品图 1 或产品图 2")
+        if not original_images[0]:
+            raise ValueError(f"源表第 {first_row['_row_index']} 行缺少产品图 1")
 
-        product_images = [original_images[0], original_images[1], *main_urls]
+        product_images = [original_images[0], *main_urls]
         description = replace_description_images(
             as_text(first_row.get(SOURCE_COLUMNS["long_description"]))
             or as_text(first_row.get(SOURCE_COLUMNS["short_description"])),
@@ -1285,11 +1286,11 @@ def build_output_rows(
             output_rows.append(
                 base_template_row(row, args, product_images, description, group_index, row_number)
             )
-            for image_index, image_url in enumerate(main_urls, start=3):
+            for image_index, image_url in enumerate(main_urls[1:], start=3):
                 output_rows[-1][f"image_{image_index}"] = image_url
 
         extra = extra_sku_row(first_row, args, product_images, description, extra_image_url, sku_rows, group_index, multi_product)
-        for image_index, image_url in enumerate(main_urls, start=3):
+        for image_index, image_url in enumerate(main_urls[1:], start=3):
             extra[f"image_{image_index}"] = image_url
         output_rows.append(extra)
     return output_rows
@@ -1314,7 +1315,7 @@ def convert(args: argparse.Namespace) -> Path:
 
     asset_manifest = load_asset_manifest(args.asset_manifest)
     if asset_manifest:
-        main_urls = manifest_urls(asset_manifest, "main", expected_count=7)
+        main_urls = manifest_urls(asset_manifest, "main", expected_count=MAIN_IMAGE_REPLACEMENT_COUNT)
         detail_urls = manifest_urls(asset_manifest, "detail")
         extra_image_url = manifest_url(asset_manifest, "extra", "extra")
         args.size_chart_resolved_url = args.size_chart_url or manifest_url(asset_manifest, "size_chart", "detail")
@@ -1340,6 +1341,7 @@ def convert(args: argparse.Namespace) -> Path:
         detail_urls = resolver.resolve_many("detail", detail_images)
         extra_image_url = resolver.resolve("extra", args.extra_sku_image)
         args.size_chart_resolved_url = args.size_chart_url or resolver.resolve("detail", args.size_chart_image)
+        main_urls = [*main_urls, args.size_chart_resolved_url]
 
     source_rows = read_source_rows(source_path)
     output_rows = build_output_rows(source_rows, args, main_urls, detail_urls, extra_image_url)
