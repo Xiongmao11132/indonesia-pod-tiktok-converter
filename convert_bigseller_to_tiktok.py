@@ -1069,28 +1069,46 @@ def expand_rows_to_target_sizes(
     target_sizes: list[str],
     args: argparse.Namespace,
 ) -> list[dict[str, object]]:
-    def fallback_color_group() -> dict[str, object]:
-        inferred, _ = infer_group_color_code(rows, args)
+    def output_color_groups() -> list[dict[str, object]]:
         allowed_colors = parse_color_codes(args.allowed_colors)
-        if inferred not in allowed_colors:
-            default_color = normalize_color_code(args.default_color_code) or args.default_color_code.upper()
-            inferred = default_color if default_color in allowed_colors else allowed_colors[0]
-        return {"code": inferred, "label": "", "source_matched": True}
+        selected = [
+            code
+            for code in parse_color_codes(args.output_colors)
+            if code in allowed_colors
+        ]
+        if not selected:
+            raise ValueError("--output-colors 至少要包含 BK 或 WH 中的一个")
+        return [
+            {"code": code, "label": COLOR_DISPLAY.get(code, code)}
+            for code in selected
+        ]
+
+    selected_groups = output_color_groups()
+    source_image_color = normalize_color_code(args.source_image_color) or args.source_image_color.upper()
+    if source_image_color not in parse_color_codes(args.allowed_colors):
+        source_image_color = "BK"
 
     size_key = detect_size_key(rows)
     if not size_key:
-        color_group = fallback_color_group()
         expanded = []
-        for size in target_sizes:
-            new_row = dict(rows[0])
-            new_row[SOURCE_COLUMNS["variation_name_1"]] = "Ukuran"
-            new_row[SOURCE_COLUMNS["variation_value_1"]] = size
-            new_row[SOURCE_COLUMNS["variation_name_2"]] = None
-            new_row[SOURCE_COLUMNS["variation_value_2"]] = None
-            new_row["_sku_color_code"] = color_group["code"]
-            new_row["_sku_size"] = size
-            new_row["_sku_variant_image_allowed"] = True
-            expanded.append(new_row)
+        for color_group in selected_groups:
+            color_code = as_text(color_group["code"])
+            for size in target_sizes:
+                new_row = dict(rows[0])
+                if len(selected_groups) > 1:
+                    new_row[SOURCE_COLUMNS["variation_name_1"]] = "Warna"
+                    new_row[SOURCE_COLUMNS["variation_value_1"]] = color_group["label"]
+                    new_row[SOURCE_COLUMNS["variation_name_2"]] = "Ukuran"
+                    new_row[SOURCE_COLUMNS["variation_value_2"]] = size
+                else:
+                    new_row[SOURCE_COLUMNS["variation_name_1"]] = "Ukuran"
+                    new_row[SOURCE_COLUMNS["variation_value_1"]] = size
+                    new_row[SOURCE_COLUMNS["variation_name_2"]] = None
+                    new_row[SOURCE_COLUMNS["variation_value_2"]] = None
+                new_row["_sku_color_code"] = color_code
+                new_row["_sku_size"] = size
+                new_row["_sku_variant_image_allowed"] = color_code == source_image_color
+                expanded.append(new_row)
         return expanded
 
     size_header = SOURCE_COLUMNS[size_key]
@@ -1099,34 +1117,21 @@ def expand_rows_to_target_sizes(
     other_header = SOURCE_COLUMNS[other_key]
     other_name_header = SOURCE_COLUMNS[paired_variation_key(other_key, "name")]
 
-    other_values = ordered_unique_values(rows, other_key)
-    other_is_color = bool(other_values) and any(not normalize_size(value) for value in other_values)
-    allowed_colors = parse_color_codes(args.allowed_colors)
-    if other_is_color:
-        color_groups = []
-        seen_colors = set()
-        for row in rows:
-            color_code = normalize_color_code(row.get(other_header))
-            if color_code not in allowed_colors or color_code in seen_colors:
-                continue
-            seen_colors.add(color_code)
-            color_groups.append(
-                {
-                    "code": color_code,
-                    "label": as_text(row.get(other_header)) or COLOR_DISPLAY.get(color_code, color_code),
-                    "source_matched": True,
-                }
-            )
-        if not color_groups:
-            color_groups = [fallback_color_group()]
-            other_is_color = False
-    else:
-        color_groups = [fallback_color_group()]
+    source_color_codes: list[str] = []
+    seen_colors = set()
+    for row in rows:
+        color_code = normalize_color_code(row.get(other_header))
+        if color_code not in parse_color_codes(args.allowed_colors) or color_code in seen_colors:
+            continue
+        seen_colors.add(color_code)
+        source_color_codes.append(color_code)
+    other_is_color = bool(source_color_codes)
 
     expanded = []
-    for color_group in color_groups:
+    for color_group in selected_groups:
         color_code = as_text(color_group["code"])
-        candidates = [row for row in rows if normalize_color_code(row.get(other_header)) == color_code] if other_is_color else rows
+        has_source_color = other_is_color and color_code in source_color_codes
+        candidates = [row for row in rows if normalize_color_code(row.get(other_header)) == color_code] if has_source_color else rows
         valid_candidates = [row for row in candidates if normalize_size(row.get(size_header))]
         template_fallback = valid_candidates[0] if valid_candidates else (candidates[0] if candidates else rows[0])
 
@@ -1140,10 +1145,10 @@ def expand_rows_to_target_sizes(
             new_row[size_name_header] = as_text(new_row.get(size_name_header)) or "Ukuran"
             new_row["_sku_color_code"] = color_code
             new_row["_sku_size"] = size
-            new_row["_sku_variant_image_allowed"] = True
-            if other_is_color:
+            new_row["_sku_variant_image_allowed"] = has_source_color or (not other_is_color and color_code == source_image_color)
+            if other_is_color or len(selected_groups) > 1:
                 new_row[other_header] = as_text(color_group["label"]) or COLOR_DISPLAY.get(color_code, color_code)
-                new_row[other_name_header] = as_text(new_row.get(other_name_header)) or "Warna"
+                new_row[other_name_header] = "Warna"
             else:
                 new_row[other_header] = None
                 new_row[other_name_header] = None
@@ -1430,6 +1435,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-detect-max-images", type=int, default=4)
     parser.add_argument("--image-detect-timeout", type=int, default=12)
     parser.add_argument("--allowed-colors", default="BK,WH")
+    parser.add_argument("--output-colors", default="BK,WH", help="最终生成的底色 SKU，默认 BK,WH")
+    parser.add_argument("--source-image-color", default="BK", help="源表没有明确颜色列时，源 SKU 图属于哪个底色，默认 BK")
     parser.add_argument("--default-color-code", default="BK")
     parser.add_argument("--shipping-insurance", default="Optional")
     parser.add_argument("--start-row", type=int, default=DATA_START_ROW)

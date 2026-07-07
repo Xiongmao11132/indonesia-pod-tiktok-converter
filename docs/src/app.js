@@ -38,24 +38,26 @@ function renderProducts(groups) {
   choices = {};
 
   for (const group of groups) {
-    const needsManualColor = !group.inferredColor;
+    const sourceImageColors = group.sourceImageColors || [];
+    const hasExplicitColorImages = sourceImageColors.length > 0;
     choices[group.productNo] = {
       side: "P",
-      fallbackColor: group.inferredColor || "BK",
+      colors: ["BK", "WH"],
+      sourceImageColor: "BK",
     };
-    const colorControl = needsManualColor
+    const sourceImageControl = hasExplicitColorImages
       ? `
-        <div>
-          <div class="field-label">底色</div>
-          <div class="segmented">
-            <label><input type="radio" name="color-${group.productNo}" value="BK" checked> BK</label>
-            <label><input type="radio" name="color-${group.productNo}" value="WH"> WH</label>
-          </div>
+        <div class="auto-note">
+          可复用 SKU 图：${escapeHtml(sourceImageColors.join(" / "))}
         </div>
       `
       : `
-        <div class="auto-note">
-          已识别底色：${escapeHtml(group.inferredColor)}
+        <div>
+          <div class="field-label">源图底色</div>
+          <div class="segmented">
+            <label><input type="radio" name="source-color-${group.productNo}" value="BK" checked> BK</label>
+            <label><input type="radio" name="source-color-${group.productNo}" value="WH"> WH</label>
+          </div>
         </div>
       `;
 
@@ -81,7 +83,14 @@ function renderProducts(groups) {
             <label><input type="radio" name="side-${group.productNo}" value="PR"> PR</label>
           </div>
         </div>
-        ${colorControl}
+        <div>
+          <div class="field-label">生成底色</div>
+          <div class="segmented">
+            <label><input type="checkbox" name="output-color-${group.productNo}" value="BK" checked> BK</label>
+            <label><input type="checkbox" name="output-color-${group.productNo}" value="WH" checked> WH</label>
+          </div>
+        </div>
+        ${sourceImageControl}
       </div>
     `;
 
@@ -90,9 +99,16 @@ function renderProducts(groups) {
         choices[group.productNo].side = radio.value;
       });
     });
-    card.querySelectorAll(`input[name="color-${group.productNo}"]`).forEach((radio) => {
+    card.querySelectorAll(`input[name="output-color-${group.productNo}"]`).forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        choices[group.productNo].colors = Array.from(
+          card.querySelectorAll(`input[name="output-color-${group.productNo}"]:checked`),
+        ).map((input) => input.value);
+      });
+    });
+    card.querySelectorAll(`input[name="source-color-${group.productNo}"]`).forEach((radio) => {
       radio.addEventListener("change", () => {
-        choices[group.productNo].fallbackColor = radio.value;
+        choices[group.productNo].sourceImageColor = radio.value;
       });
     });
     productsEl.append(card);
@@ -121,7 +137,7 @@ sourceInput.addEventListener("change", async () => {
     renderProducts(sourceState.groups);
     summaryEl.textContent = `已读取 ${sourceState.groups.length} 个商品，SKU 日期 ${sourceState.skuDate}`;
     generateButton.disabled = false;
-    setStatus("请确认每个商品的 P/PR；无法识别底色的商品请手动选 BK/WH。");
+    setStatus("请确认每个商品的 P/PR、生成底色；无明确颜色图时请选源图底色。");
   } catch (error) {
     setStatus(error.message || String(error), true);
   }

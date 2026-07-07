@@ -246,38 +246,65 @@ function orderedUniqueValues(rows, sourceKey) {
   return values;
 }
 
-function inferGroupColorCode(rows) {
+function colorCodesInRows(rows, valueKey) {
+  const header = SOURCE_COLUMNS[valueKey];
+  const seen = new Set();
+  const codes = [];
   for (const row of rows) {
-    for (const key of ["variation_value_1", "variation_value_2", "name"]) {
-      const code = normalizeColorCode(row[SOURCE_COLUMNS[key]]);
-      if (code === "BK" || code === "WH") return code;
+    const code = normalizeColorCode(row[header]);
+    if (!["BK", "WH"].includes(code) || seen.has(code)) continue;
+    seen.add(code);
+    codes.push(code);
+  }
+  return codes;
+}
+
+function sourceImageColorCodes(rows) {
+  const codes = new Set();
+  for (const key of ["variation_value_1", "variation_value_2"]) {
+    const header = SOURCE_COLUMNS[key];
+    for (const row of rows) {
+      const code = normalizeColorCode(row[header]);
+      if (["BK", "WH"].includes(code) && text(row[SOURCE_COLUMNS.variant_image_1])) {
+        codes.add(code);
+      }
     }
   }
-  return "";
+  return Array.from(codes);
 }
 
-function fallbackColorGroup(rows, fallbackColor = "BK") {
-  const detected = inferGroupColorCode(rows);
-  const fallback = fallbackColor === "WH" ? "WH" : "BK";
-  const code = detected || fallback;
-  return { code, label: "", sourceMatched: true };
+function outputColorGroups(selectedColors) {
+  const clean = Array.isArray(selectedColors) ? selectedColors : [];
+  const unique = clean.filter((code, index) => ["BK", "WH"].includes(code) && clean.indexOf(code) === index);
+  if (!unique.length) throw new Error("每个商品至少要选择一个生成底色 BK 或 WH");
+  return unique.map((code) => ({ code, label: COLOR_DISPLAY[code] || code }));
 }
 
-function expandRowsToTargetSizes(rows, fallbackColor) {
+function expandRowsToTargetSizes(rows, selectedColors, sourceImageColor = "BK") {
+  const selectedGroups = outputColorGroups(selectedColors);
+  const manualSourceColor = sourceImageColor === "WH" ? "WH" : "BK";
   const sizeKey = detectSizeKey(rows);
   if (!sizeKey) {
-    const colorGroup = fallbackColorGroup(rows, fallbackColor);
     const expanded = [];
-    for (const size of TARGET_SIZES) {
-      const next = { ...rows[0] };
-      next[SOURCE_COLUMNS.variation_name_1] = "Ukuran";
-      next[SOURCE_COLUMNS.variation_value_1] = size;
-      next[SOURCE_COLUMNS.variation_name_2] = "";
-      next[SOURCE_COLUMNS.variation_value_2] = "";
-      next._sku_size = size;
-      next._sku_color_code = colorGroup.code;
-      next._sku_variant_image_allowed = true;
-      expanded.push(next);
+    for (const group of selectedGroups) {
+      for (const size of TARGET_SIZES) {
+        const next = { ...rows[0] };
+        if (selectedGroups.length > 1) {
+          next[SOURCE_COLUMNS.variation_name_1] = "Warna";
+          next[SOURCE_COLUMNS.variation_value_1] = group.label;
+          next[SOURCE_COLUMNS.variation_name_2] = "Ukuran";
+          next[SOURCE_COLUMNS.variation_value_2] = size;
+        } else {
+          next[SOURCE_COLUMNS.variation_name_1] = "Ukuran";
+          next[SOURCE_COLUMNS.variation_value_1] = size;
+          next[SOURCE_COLUMNS.variation_name_2] = "";
+          next[SOURCE_COLUMNS.variation_value_2] = "";
+        }
+        next._sku_size = size;
+        next._sku_color_code = group.code;
+        next._sku_variant_image_allowed = group.code === manualSourceColor;
+        expanded.push(next);
+      }
     }
     return expanded;
   }
@@ -287,29 +314,13 @@ function expandRowsToTargetSizes(rows, fallbackColor) {
   const otherKey = otherVariationValueKey(sizeKey);
   const otherHeader = SOURCE_COLUMNS[otherKey];
   const otherNameHeader = SOURCE_COLUMNS[pairedVariationKey(otherKey, "name")];
-  const otherValues = orderedUniqueValues(rows, otherKey);
-  let otherIsColor = otherValues.length > 0 && otherValues.some((value) => !normalizeSize(value));
-  let colorGroups = [];
-
-  if (otherIsColor) {
-    const seenColors = new Set();
-    for (const row of rows) {
-      const colorCode = normalizeColorCode(row[otherHeader]);
-      if (!["BK", "WH"].includes(colorCode) || seenColors.has(colorCode)) continue;
-      seenColors.add(colorCode);
-      colorGroups.push({ code: colorCode, label: text(row[otherHeader]) || COLOR_DISPLAY[colorCode], sourceMatched: true });
-    }
-    if (!colorGroups.length) {
-      otherIsColor = false;
-      colorGroups = [fallbackColorGroup(rows, fallbackColor)];
-    }
-  } else {
-    colorGroups = [fallbackColorGroup(rows, fallbackColor)];
-  }
+  const sourceColorCodes = colorCodesInRows(rows, otherKey);
+  const otherIsColor = sourceColorCodes.length > 0;
 
   const expanded = [];
-  for (const group of colorGroups) {
-    const candidates = otherIsColor ? rows.filter((row) => normalizeColorCode(row[otherHeader]) === group.code) : rows;
+  for (const group of selectedGroups) {
+    const hasSourceColor = otherIsColor && sourceColorCodes.includes(group.code);
+    const candidates = hasSourceColor ? rows.filter((row) => normalizeColorCode(row[otherHeader]) === group.code) : rows;
     const validCandidates = candidates.filter((row) => normalizeSize(row[sizeHeader]));
     const fallback = validCandidates[0] || candidates[0] || rows[0];
 
@@ -320,10 +331,10 @@ function expandRowsToTargetSizes(rows, fallbackColor) {
       next[sizeNameHeader] = text(next[sizeNameHeader]) || "Ukuran";
       next._sku_size = size;
       next._sku_color_code = group.code;
-      next._sku_variant_image_allowed = true;
-      if (otherIsColor) {
+      next._sku_variant_image_allowed = hasSourceColor || (!otherIsColor && group.code === manualSourceColor);
+      if (otherIsColor || selectedGroups.length > 1) {
         next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
-        next[otherNameHeader] = text(next[otherNameHeader]) || "Warna";
+        next[otherNameHeader] = "Warna";
       } else {
         next[otherHeader] = "";
         next[otherNameHeader] = "";
@@ -454,7 +465,8 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
     const firstRow = group.rows[0];
     const choice = choices[productNo] || {};
     const side = choice.side === "PR" ? "PR" : "P";
-    const fallbackColor = choice.fallbackColor === "WH" ? "WH" : "BK";
+    const selectedColors = Array.isArray(choice.colors) ? choice.colors : ["BK", "WH"];
+    const sourceImageColor = choice.sourceImageColor === "WH" ? "WH" : "BK";
     const originalImages = sourceImages(firstRow);
     if (!originalImages[0]) {
       throw new Error(`商品 ${productNo} 缺少产品图 1`);
@@ -465,7 +477,7 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
       text(firstRow[SOURCE_COLUMNS.long_description]) || text(firstRow[SOURCE_COLUMNS.short_description]),
       assets.detailUrls,
     );
-    const skuRows = expandRowsToTargetSizes(group.rows, fallbackColor);
+    const skuRows = expandRowsToTargetSizes(group.rows, selectedColors, sourceImageColor);
 
     reviewRows.push({
       product_no: productNo,
@@ -516,7 +528,7 @@ function groupRows(rows) {
       sourceUrl: text(firstRow[SOURCE_COLUMNS.source_url]),
       image: sourceImages(firstRow)[0],
       thumbs,
-      inferredColor: inferGroupColorCode(groupRowsValue),
+      sourceImageColors: sourceImageColorCodes(groupRowsValue),
     };
   });
 }
