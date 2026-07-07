@@ -119,7 +119,8 @@ const TARGET_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"];
 const DATA_START_ROW = 6;
 const DELIVERY_TEXT = "The delivery options for this product are the same as the delivery options for the shop. ";
 const EXTRA_VARIATION_VALUE_1 = "Pengiriman kilat 48 jam";
-const EXTRA_VARIATION_VALUE_2 = "Jangan beli";
+const EXTRA_VARIATION_NAME_2 = "Catatan";
+const EXTRA_VARIATION_VALUE_2 = "Jangan membeli tautan ini";
 
 function text(value) {
   return value == null ? "" : String(value).trim();
@@ -400,7 +401,7 @@ function templateRow(row, productImages, description, sizeChartUrl, skuDate, gro
 
 function extraRow(firstRow, productImages, description, extraImageUrl, sizeChartUrl, skuDate, groupIndex) {
   const variationName1 = text(firstRow[SOURCE_COLUMNS.variation_name_1]);
-  const variationName2 = text(firstRow[SOURCE_COLUMNS.variation_name_2]);
+  const variationName2 = text(firstRow[SOURCE_COLUMNS.variation_name_2]) || EXTRA_VARIATION_NAME_2;
   return {
     category: "Men's Tops/T-shirts",
     brand: "No brand",
@@ -412,7 +413,7 @@ function extraRow(firstRow, productImages, description, extraImageUrl, sizeChart
     property_value_1: variationName1 ? EXTRA_VARIATION_VALUE_1 : "",
     property_1_image: extraImageUrl,
     property_name_2: variationName2,
-    property_value_2: variationName2 ? EXTRA_VARIATION_VALUE_2 : "",
+    property_value_2: EXTRA_VARIATION_VALUE_2,
     parcel_weight: 210,
     parcel_length: 25,
     parcel_width: 22,

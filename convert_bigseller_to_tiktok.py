@@ -51,7 +51,8 @@ DEFAULT_EXTRA_IMAGE = Path(
 )
 EXTRA_SKU_TEXT = "Pengiriman kilat dalam 48 jam (Jangan melakukan pembelian melalui tautan ini)"
 EXTRA_VARIATION_VALUE_1 = "Pengiriman kilat 48 jam"
-EXTRA_VARIATION_VALUE_2 = "Jangan beli"
+EXTRA_VARIATION_NAME_2 = "Catatan"
+EXTRA_VARIATION_VALUE_2 = "Jangan membeli tautan ini"
 DELIVERY_TEXT = "The delivery options for this product are the same as the delivery options for the shop. "
 DEFAULT_SIZE_CHART_IMAGE = DEFAULT_DETAIL_IMAGE_DIR / "主8尺码表.png"
 MAIN_IMAGE_REPLACEMENT_COUNT = 8
@@ -1216,7 +1217,7 @@ def extra_sku_row(
     base_price = args.normal_price if args.normal_price is not None else (min(prices) if prices else 0)
     price = args.extra_price if args.extra_price is not None else max(base_price - args.extra_price_discount, 0)
     variation_name_1 = as_text(first_row.get(SOURCE_COLUMNS["variation_name_1"]))
-    variation_name_2 = as_text(first_row.get(SOURCE_COLUMNS["variation_name_2"]))
+    variation_name_2 = as_text(first_row.get(SOURCE_COLUMNS["variation_name_2"])) or EXTRA_VARIATION_NAME_2
 
     output = {
         "category": args.category,
@@ -1229,7 +1230,7 @@ def extra_sku_row(
         "property_value_1": EXTRA_VARIATION_VALUE_1 if variation_name_1 else "",
         "property_1_image": extra_image_url,
         "property_name_2": variation_name_2,
-        "property_value_2": EXTRA_VARIATION_VALUE_2 if variation_name_2 else "",
+        "property_value_2": EXTRA_VARIATION_VALUE_2,
         "parcel_weight": args.weight,
         "parcel_length": args.length,
         "parcel_width": args.width,
