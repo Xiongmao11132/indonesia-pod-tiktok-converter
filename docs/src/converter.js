@@ -116,7 +116,6 @@ const SIZE_ALIASES = {
 };
 
 const TARGET_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"];
-const TARGET_COLORS = ["BK", "WH"];
 const DATA_START_ROW = 6;
 const DELIVERY_TEXT = "The delivery options for this product are the same as the delivery options for the shop. ";
 const EXTRA_VARIATION_VALUE_1 = "Pengiriman kilat 48 jam";
@@ -257,49 +256,27 @@ function inferGroupColorCode(rows) {
   return "";
 }
 
-function rowHasColorCode(row, colorCode) {
-  return ["variation_value_1", "variation_value_2"].some((key) => (
-    normalizeColorCode(row[SOURCE_COLUMNS[key]]) === colorCode
-  ));
-}
-
-function targetColorGroups(rows) {
-  const sourceLabels = new Map();
-  for (const row of rows) {
-    for (const key of ["variation_value_1", "variation_value_2"]) {
-      const code = normalizeColorCode(row[SOURCE_COLUMNS[key]]);
-      if (TARGET_COLORS.includes(code) && !sourceLabels.has(code)) {
-        sourceLabels.set(code, text(row[SOURCE_COLUMNS[key]]) || COLOR_DISPLAY[code]);
-      }
-    }
-  }
-  return TARGET_COLORS.map((code) => ({
-    code,
-    label: sourceLabels.get(code) || COLOR_DISPLAY[code],
-    sourceMatched: sourceLabels.has(code),
-  }));
+function fallbackColorGroup(rows) {
+  const detected = inferGroupColorCode(rows);
+  const code = detected || "BK";
+  return { code, label: "", sourceMatched: true };
 }
 
 function expandRowsToTargetSizes(rows) {
   const sizeKey = detectSizeKey(rows);
-  const colorGroups = targetColorGroups(rows);
   if (!sizeKey) {
+    const colorGroup = fallbackColorGroup(rows);
     const expanded = [];
-    for (const group of colorGroups) {
-      const sourceTemplate = group.sourceMatched
-        ? rows.find((row) => rowHasColorCode(row, group.code)) || rows[0]
-        : rows[0];
-      for (const size of TARGET_SIZES) {
-        const next = { ...sourceTemplate };
-        next[SOURCE_COLUMNS.variation_name_1] = "Warna";
-        next[SOURCE_COLUMNS.variation_value_1] = group.label || COLOR_DISPLAY[group.code] || group.code;
-        next[SOURCE_COLUMNS.variation_name_2] = "Ukuran";
-        next[SOURCE_COLUMNS.variation_value_2] = size;
-        next._sku_size = size;
-        next._sku_color_code = group.code;
-        next._sku_variant_image_allowed = group.sourceMatched;
-        expanded.push(next);
-      }
+    for (const size of TARGET_SIZES) {
+      const next = { ...rows[0] };
+      next[SOURCE_COLUMNS.variation_name_1] = "Ukuran";
+      next[SOURCE_COLUMNS.variation_value_1] = size;
+      next[SOURCE_COLUMNS.variation_name_2] = "";
+      next[SOURCE_COLUMNS.variation_value_2] = "";
+      next._sku_size = size;
+      next._sku_color_code = colorGroup.code;
+      next._sku_variant_image_allowed = true;
+      expanded.push(next);
     }
     return expanded;
   }
@@ -310,13 +287,28 @@ function expandRowsToTargetSizes(rows) {
   const otherHeader = SOURCE_COLUMNS[otherKey];
   const otherNameHeader = SOURCE_COLUMNS[pairedVariationKey(otherKey, "name")];
   const otherValues = orderedUniqueValues(rows, otherKey);
-  const otherIsColor = otherValues.some((value) => TARGET_COLORS.includes(normalizeColorCode(value)));
+  let otherIsColor = otherValues.length > 0 && otherValues.some((value) => !normalizeSize(value));
+  let colorGroups = [];
+
+  if (otherIsColor) {
+    const seenColors = new Set();
+    for (const row of rows) {
+      const colorCode = normalizeColorCode(row[otherHeader]);
+      if (!["BK", "WH"].includes(colorCode) || seenColors.has(colorCode)) continue;
+      seenColors.add(colorCode);
+      colorGroups.push({ code: colorCode, label: text(row[otherHeader]) || COLOR_DISPLAY[colorCode], sourceMatched: true });
+    }
+    if (!colorGroups.length) {
+      otherIsColor = false;
+      colorGroups = [fallbackColorGroup(rows)];
+    }
+  } else {
+    colorGroups = [fallbackColorGroup(rows)];
+  }
 
   const expanded = [];
   for (const group of colorGroups) {
-    const candidates = otherIsColor && group.sourceMatched
-      ? rows.filter((row) => normalizeColorCode(row[otherHeader]) === group.code)
-      : rows;
+    const candidates = otherIsColor ? rows.filter((row) => normalizeColorCode(row[otherHeader]) === group.code) : rows;
     const validCandidates = candidates.filter((row) => normalizeSize(row[sizeHeader]));
     const fallback = validCandidates[0] || candidates[0] || rows[0];
 
@@ -327,9 +319,14 @@ function expandRowsToTargetSizes(rows) {
       next[sizeNameHeader] = text(next[sizeNameHeader]) || "Ukuran";
       next._sku_size = size;
       next._sku_color_code = group.code;
-      next._sku_variant_image_allowed = group.sourceMatched;
-      next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
-      next[otherNameHeader] = "Warna";
+      next._sku_variant_image_allowed = true;
+      if (otherIsColor) {
+        next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
+        next[otherNameHeader] = text(next[otherNameHeader]) || "Warna";
+      } else {
+        next[otherHeader] = "";
+        next[otherNameHeader] = "";
+      }
       expanded.push(next);
     }
   }
@@ -361,7 +358,7 @@ function extraSku(skuDate, groupIndex) {
   return `${skuPrefix()}-${skuDate}${String(groupIndex).padStart(3, "0")}-NB`.slice(0, 50);
 }
 
-function templateRow(row, productImages, description, skuDate, groupIndex, side) {
+function templateRow(row, productImages, description, sizeChartUrl, skuDate, groupIndex, side) {
   const variantImage = row._sku_variant_image_allowed === false ? "" : text(row[SOURCE_COLUMNS.variant_image_1]);
   return {
     category: "Men's Tops/T-shirts",
@@ -383,13 +380,13 @@ function templateRow(row, productImages, description, skuDate, groupIndex, side)
     price: 259000,
     quantity: 999,
     seller_sku: normalSku(row, skuDate, groupIndex, side),
-    size_chart: productImages[8],
+    size_chart: sizeChartUrl,
     shipping_insurance: "Optional",
     ...PRODUCT_PROPERTIES,
   };
 }
 
-function extraRow(firstRow, productImages, description, extraImageUrl, skuDate, groupIndex) {
+function extraRow(firstRow, productImages, description, extraImageUrl, sizeChartUrl, skuDate, groupIndex) {
   const variationName1 = text(firstRow[SOURCE_COLUMNS.variation_name_1]);
   const variationName2 = text(firstRow[SOURCE_COLUMNS.variation_name_2]);
   return {
@@ -412,7 +409,7 @@ function extraRow(firstRow, productImages, description, extraImageUrl, skuDate, 
     price: 141300,
     quantity: 999,
     seller_sku: extraSku(skuDate, groupIndex),
-    size_chart: productImages[8],
+    size_chart: sizeChartUrl,
     shipping_insurance: "Optional",
     ...PRODUCT_PROPERTIES,
   };
@@ -479,14 +476,14 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
     });
 
     for (const row of skuRows) {
-      const out = templateRow(row, productImages, description, skuDate, groupIndex, side);
+      const out = templateRow(row, productImages, description, assets.sizeChartUrl, skuDate, groupIndex, side);
       assets.mainUrls.slice(1).forEach((url, offset) => {
         out[`image_${offset + 3}`] = url;
       });
       outputRows.push(out);
     }
 
-    const extra = extraRow(firstRow, productImages, description, assets.extraUrl, skuDate, groupIndex);
+    const extra = extraRow(firstRow, productImages, description, assets.extraUrl, assets.sizeChartUrl, skuDate, groupIndex);
     assets.mainUrls.slice(1).forEach((url, offset) => {
       extra[`image_${offset + 3}`] = url;
     });
@@ -541,9 +538,11 @@ export async function buildTikTokWorkbook({ groups, choices, sourceFilename }) {
     mainUrls: assetUrls(manifest, "main"),
     detailUrls: assetUrls(manifest, "detail"),
     extraUrl: assetUrl(manifest, "extra", "extra"),
+    sizeChartUrl: assetUrl(manifest, "size_chart", "detail"),
   };
   if (assets.mainUrls.length !== 8) throw new Error("R2 主图配置必须正好有 8 张图片");
   if (!assets.detailUrls.length) throw new Error("R2 详情图配置不能为空");
+  if (!assets.sizeChartUrl) throw new Error("R2 尺码表配置不能为空");
 
   const skuDate = skuDateFromFilename(sourceFilename);
   const templateArray = await fetch("./template.xlsx").then((response) => response.arrayBuffer());
