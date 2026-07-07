@@ -56,6 +56,7 @@ DELIVERY_TEXT = "The delivery options for this product are the same as the deliv
 DEFAULT_SIZE_CHART_IMAGE = DEFAULT_DETAIL_IMAGE_DIR / "主8尺码表.png"
 MAIN_IMAGE_REPLACEMENT_COUNT = 8
 DEFAULT_TARGET_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"]
+DEFAULT_TARGET_COLORS = ["BK", "WH"]
 SIZE_ALIASES = {
     "S": "S",
     "M": "M",
@@ -1069,24 +1070,41 @@ def expand_rows_to_target_sizes(
     target_sizes: list[str],
     args: argparse.Namespace,
 ) -> list[dict[str, object]]:
-    def fallback_color_groups() -> list[dict[str, object]]:
-        allowed_colors = parse_color_codes(args.allowed_colors)
+    def row_has_color_code(row: dict[str, object], color_code: str) -> bool:
+        return any(
+            normalize_color_code(row.get(SOURCE_COLUMNS[key])) == color_code
+            for key in ("variation_value_1", "variation_value_2")
+        )
+
+    def target_color_groups() -> list[dict[str, object]]:
+        allowed_colors = [code for code in DEFAULT_TARGET_COLORS if code in parse_color_codes(args.allowed_colors)]
+        source_labels: dict[str, str] = {}
         for row in rows:
             for key in ("variation_value_1", "variation_value_2"):
                 code = normalize_color_code(row.get(SOURCE_COLUMNS[key]))
-                if code in allowed_colors:
-                    return [{"code": code, "label": "", "source_matched": True}]
+                if code in allowed_colors and code not in source_labels:
+                    source_labels[code] = as_text(row.get(SOURCE_COLUMNS[key])) or COLOR_DISPLAY.get(code, code)
         return [
-            {"code": "BK", "label": COLOR_DISPLAY.get("BK", "Black"), "source_matched": False},
-            {"code": "WH", "label": COLOR_DISPLAY.get("WH", "White"), "source_matched": False},
+            {
+                "code": code,
+                "label": source_labels.get(code) or COLOR_DISPLAY.get(code, code),
+                "source_matched": code in source_labels,
+            }
+            for code in allowed_colors
         ]
 
     size_key = detect_size_key(rows)
+    color_groups = target_color_groups()
     if not size_key:
         expanded = []
-        for color_group in fallback_color_groups():
+        for color_group in color_groups:
+            source_template = (
+                next((row for row in rows if row_has_color_code(row, as_text(color_group["code"]))), rows[0])
+                if color_group["source_matched"]
+                else rows[0]
+            )
             for size in target_sizes:
-                new_row = dict(rows[0])
+                new_row = dict(source_template)
                 new_row[SOURCE_COLUMNS["variation_name_1"]] = "Warna"
                 new_row[SOURCE_COLUMNS["variation_value_1"]] = (
                     as_text(color_group["label"]) or COLOR_DISPLAY.get(as_text(color_group["code"]), as_text(color_group["code"]))
@@ -1106,37 +1124,15 @@ def expand_rows_to_target_sizes(
     other_name_header = SOURCE_COLUMNS[paired_variation_key(other_key, "name")]
 
     other_values = ordered_unique_values(rows, other_key)
-    other_is_color = bool(other_values) and any(not normalize_size(value) for value in other_values)
-    allowed_colors = parse_color_codes(args.allowed_colors)
-    if other_is_color:
-        groups = []
-        seen_colors = set()
-        for row in rows:
-            color_code = normalize_color_code(row.get(other_header))
-            if color_code not in allowed_colors or color_code in seen_colors:
-                continue
-            seen_colors.add(color_code)
-            groups.append(
-                {
-                    "code": color_code,
-                    "label": as_text(row.get(other_header)) or COLOR_DISPLAY.get(color_code, color_code),
-                    "source_matched": True,
-                }
-            )
-        if not groups:
-            groups = fallback_color_groups()
-            other_is_color = False
-    else:
-        groups = fallback_color_groups()
+    other_is_color = any(normalize_color_code(value) in DEFAULT_TARGET_COLORS for value in other_values)
 
     expanded = []
-    for color_group in groups:
+    for color_group in color_groups:
         color_code = as_text(color_group["code"])
-        candidates = [
-            row
-            for row in rows
-            if not other_is_color or normalize_color_code(row.get(other_header)) == color_code
-        ]
+        if other_is_color and color_group["source_matched"]:
+            candidates = [row for row in rows if normalize_color_code(row.get(other_header)) == color_code]
+        else:
+            candidates = rows
         valid_candidates = [row for row in candidates if normalize_size(row.get(size_header))]
         template_fallback = valid_candidates[0] if valid_candidates else (candidates[0] if candidates else rows[0])
 
@@ -1151,12 +1147,8 @@ def expand_rows_to_target_sizes(
             new_row["_sku_color_code"] = color_code
             new_row["_sku_size"] = size
             new_row["_sku_variant_image_allowed"] = color_group["source_matched"]
-            if other_is_color:
-                new_row[other_header] = as_text(color_group["label"]) or COLOR_DISPLAY.get(color_code, color_code)
-                new_row[other_name_header] = as_text(new_row.get(other_name_header)) or "Warna"
-            else:
-                new_row[other_header] = None
-                new_row[other_name_header] = None
+            new_row[other_header] = as_text(color_group["label"]) or COLOR_DISPLAY.get(color_code, color_code)
+            new_row[other_name_header] = "Warna"
             expanded.append(new_row)
     return expanded
 

@@ -116,6 +116,7 @@ const SIZE_ALIASES = {
 };
 
 const TARGET_SIZES = ["S", "M", "L", "XL", "XXL", "XXXL"];
+const TARGET_COLORS = ["BK", "WH"];
 const DATA_START_ROW = 6;
 const DELIVERY_TEXT = "The delivery options for this product are the same as the delivery options for the shop. ";
 const EXTRA_VARIATION_VALUE_1 = "Pengiriman kilat 48 jam";
@@ -256,22 +257,40 @@ function inferGroupColorCode(rows) {
   return "";
 }
 
-function fallbackColorGroups(rows) {
-  const detected = inferGroupColorCode(rows);
-  if (detected) return [{ code: detected, label: "", sourceMatched: true }];
-  return [
-    { code: "BK", label: COLOR_DISPLAY.BK, sourceMatched: false },
-    { code: "WH", label: COLOR_DISPLAY.WH, sourceMatched: false },
-  ];
+function rowHasColorCode(row, colorCode) {
+  return ["variation_value_1", "variation_value_2"].some((key) => (
+    normalizeColorCode(row[SOURCE_COLUMNS[key]]) === colorCode
+  ));
+}
+
+function targetColorGroups(rows) {
+  const sourceLabels = new Map();
+  for (const row of rows) {
+    for (const key of ["variation_value_1", "variation_value_2"]) {
+      const code = normalizeColorCode(row[SOURCE_COLUMNS[key]]);
+      if (TARGET_COLORS.includes(code) && !sourceLabels.has(code)) {
+        sourceLabels.set(code, text(row[SOURCE_COLUMNS[key]]) || COLOR_DISPLAY[code]);
+      }
+    }
+  }
+  return TARGET_COLORS.map((code) => ({
+    code,
+    label: sourceLabels.get(code) || COLOR_DISPLAY[code],
+    sourceMatched: sourceLabels.has(code),
+  }));
 }
 
 function expandRowsToTargetSizes(rows) {
   const sizeKey = detectSizeKey(rows);
+  const colorGroups = targetColorGroups(rows);
   if (!sizeKey) {
     const expanded = [];
-    for (const group of fallbackColorGroups(rows)) {
+    for (const group of colorGroups) {
+      const sourceTemplate = group.sourceMatched
+        ? rows.find((row) => rowHasColorCode(row, group.code)) || rows[0]
+        : rows[0];
       for (const size of TARGET_SIZES) {
-        const next = { ...rows[0] };
+        const next = { ...sourceTemplate };
         next[SOURCE_COLUMNS.variation_name_1] = "Warna";
         next[SOURCE_COLUMNS.variation_value_1] = group.label || COLOR_DISPLAY[group.code] || group.code;
         next[SOURCE_COLUMNS.variation_name_2] = "Ukuran";
@@ -291,28 +310,13 @@ function expandRowsToTargetSizes(rows) {
   const otherHeader = SOURCE_COLUMNS[otherKey];
   const otherNameHeader = SOURCE_COLUMNS[pairedVariationKey(otherKey, "name")];
   const otherValues = orderedUniqueValues(rows, otherKey);
-  let otherIsColor = otherValues.length > 0 && otherValues.some((value) => !normalizeSize(value));
-  let groups = [];
-
-  if (otherIsColor) {
-    const seenColors = new Set();
-    for (const row of rows) {
-      const colorCode = normalizeColorCode(row[otherHeader]);
-      if (!["BK", "WH"].includes(colorCode) || seenColors.has(colorCode)) continue;
-      seenColors.add(colorCode);
-      groups.push({ code: colorCode, label: text(row[otherHeader]) || COLOR_DISPLAY[colorCode], sourceMatched: true });
-    }
-    if (!groups.length) {
-      otherIsColor = false;
-      groups = fallbackColorGroups(rows);
-    }
-  } else {
-    groups = fallbackColorGroups(rows);
-  }
+  const otherIsColor = otherValues.some((value) => TARGET_COLORS.includes(normalizeColorCode(value)));
 
   const expanded = [];
-  for (const group of groups) {
-    const candidates = rows.filter((row) => !otherIsColor || normalizeColorCode(row[otherHeader]) === group.code);
+  for (const group of colorGroups) {
+    const candidates = otherIsColor && group.sourceMatched
+      ? rows.filter((row) => normalizeColorCode(row[otherHeader]) === group.code)
+      : rows;
     const validCandidates = candidates.filter((row) => normalizeSize(row[sizeHeader]));
     const fallback = validCandidates[0] || candidates[0] || rows[0];
 
@@ -324,13 +328,8 @@ function expandRowsToTargetSizes(rows) {
       next._sku_size = size;
       next._sku_color_code = group.code;
       next._sku_variant_image_allowed = group.sourceMatched;
-      if (otherIsColor) {
-        next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
-        next[otherNameHeader] = text(next[otherNameHeader]) || "Warna";
-      } else {
-        next[otherHeader] = "";
-        next[otherNameHeader] = "";
-      }
+      next[otherHeader] = group.label || COLOR_DISPLAY[group.code] || group.code;
+      next[otherNameHeader] = "Warna";
       expanded.push(next);
     }
   }
