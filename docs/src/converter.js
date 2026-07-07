@@ -248,7 +248,7 @@ function orderedUniqueValues(rows, sourceKey) {
 
 function inferGroupColorCode(rows) {
   for (const row of rows) {
-    for (const key of ["variation_value_1", "variation_value_2"]) {
+    for (const key of ["variation_value_1", "variation_value_2", "name"]) {
       const code = normalizeColorCode(row[SOURCE_COLUMNS[key]]);
       if (code === "BK" || code === "WH") return code;
     }
