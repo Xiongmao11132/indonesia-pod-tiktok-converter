@@ -65,7 +65,7 @@ function renderProducts(groups) {
           </div>
         </div>
         <div class="auto-note">
-          无颜色选项时自动生成 BK 黑色 + WH 白色
+          自动生成 BK 黑色 + WH 白色；无对应颜色 SKU 图时留空
         </div>
       </div>
     `;
