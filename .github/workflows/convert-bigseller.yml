@@ -8,7 +8,7 @@ on:
         required: true
         default: "input/bigseller.xlsx"
       sku_date:
-        description: "SKU date, for example 20260707. Leave empty to use today's date."
+        description: "SKU date. Leave empty to use the date in scraped_product_YYYYMMDD... filename."
         required: false
         default: ""
       print_side_override:

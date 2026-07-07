@@ -28,7 +28,7 @@
 6. 左侧选择 `Convert BigSeller Excel`。
 7. 点击 `Run workflow`。
 8. `source_file` 填 `input/bigseller.xlsx`。如果你的文件名不同，就填实际路径。
-9. `sku_date` 可以留空，也可以填类似 `20260707`。
+9. `sku_date` 建议留空。脚本会从类似 `scraped_product_20260707023136128.xlsx` 的文件名里自动取 `20260707` 作为 SKU 日期；如果你想强制指定，也可以填类似 `20260707`。
 10. `print_side_override` 默认留空，让脚本自动识别 P/PR。如果某一批要人工指定，再填 `print_side_overrides.csv` 或你的 CSV 路径。
 11. 点击绿色的 `Run workflow`。
 

@@ -921,6 +921,24 @@ def sku_date(value: str) -> str:
     return dt.datetime.now().strftime("%Y%m%d")
 
 
+def sku_date_from_source_filename(path: Path) -> str:
+    for match in re.finditer(r"(20\d{6})", path.stem):
+        value = match.group(1)
+        try:
+            dt.datetime.strptime(value, "%Y%m%d")
+        except ValueError:
+            continue
+        return value
+    return ""
+
+
+def resolve_sku_date(value: str, source_path: Path) -> str:
+    explicit = re.sub(r"[^0-9]+", "", as_text(value))
+    if len(explicit) == 8:
+        return explicit
+    return sku_date_from_source_filename(source_path) or sku_date(value)
+
+
 def read_source_rows(path: Path) -> list[dict[str, object]]:
     wb = openpyxl.load_workbook(path, data_only=False)
     ws = wb.active
@@ -1280,6 +1298,7 @@ def build_output_rows(
 def convert(args: argparse.Namespace) -> Path:
     template_path = args.template or find_default_file("*_template.xlsx")
     source_path = args.source or find_default_file("scraped_product_*.xlsx")
+    args.sku_date = resolve_sku_date(args.sku_date, source_path)
     output_path = args.output
     if output_path is None:
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1344,6 +1363,7 @@ def convert(args: argparse.Namespace) -> Path:
     print(f"输出 SKU 行数：{len(output_rows)}")
     print(f"主图替换数：{len(main_urls)}")
     print(f"详情图替换数：{len(detail_urls)}")
+    print(f"SKU 日期：{args.sku_date}")
     if not (args.asset_manifest or args.asset_url_base or args.main_url_base or args.detail_url_base or args.extra_url or args.upload_r2):
         print("提示：当前本地素材写入为本地路径。正式上传 TikTok 前，请使用公网 URL 或开启 R2 上传。")
     print(f"已生成：{output_path}")
