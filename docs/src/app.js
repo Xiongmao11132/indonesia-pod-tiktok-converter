@@ -38,9 +38,26 @@ function renderProducts(groups) {
   choices = {};
 
   for (const group of groups) {
+    const needsManualColor = !group.inferredColor;
     choices[group.productNo] = {
       side: "P",
+      fallbackColor: group.inferredColor || "BK",
     };
+    const colorControl = needsManualColor
+      ? `
+        <div>
+          <div class="field-label">底色</div>
+          <div class="segmented">
+            <label><input type="radio" name="color-${group.productNo}" value="BK" checked> BK</label>
+            <label><input type="radio" name="color-${group.productNo}" value="WH"> WH</label>
+          </div>
+        </div>
+      `
+      : `
+        <div class="auto-note">
+          已识别底色：${escapeHtml(group.inferredColor)}
+        </div>
+      `;
 
     const card = document.createElement("article");
     card.className = "product-card";
@@ -64,15 +81,18 @@ function renderProducts(groups) {
             <label><input type="radio" name="side-${group.productNo}" value="PR"> PR</label>
           </div>
         </div>
-        <div class="auto-note">
-          颜色按源表 SKU 复用，仅写入 BK/WH 编码
-        </div>
+        ${colorControl}
       </div>
     `;
 
     card.querySelectorAll(`input[name="side-${group.productNo}"]`).forEach((radio) => {
       radio.addEventListener("change", () => {
         choices[group.productNo].side = radio.value;
+      });
+    });
+    card.querySelectorAll(`input[name="color-${group.productNo}"]`).forEach((radio) => {
+      radio.addEventListener("change", () => {
+        choices[group.productNo].fallbackColor = radio.value;
       });
     });
     productsEl.append(card);
@@ -101,7 +121,7 @@ sourceInput.addEventListener("change", async () => {
     renderProducts(sourceState.groups);
     summaryEl.textContent = `已读取 ${sourceState.groups.length} 个商品，SKU 日期 ${sourceState.skuDate}`;
     generateButton.disabled = false;
-    setStatus("请确认每个商品的 P/PR。");
+    setStatus("请确认每个商品的 P/PR；无法识别底色的商品请手动选 BK/WH。");
   } catch (error) {
     setStatus(error.message || String(error), true);
   }

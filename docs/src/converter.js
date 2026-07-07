@@ -256,16 +256,17 @@ function inferGroupColorCode(rows) {
   return "";
 }
 
-function fallbackColorGroup(rows) {
+function fallbackColorGroup(rows, fallbackColor = "BK") {
   const detected = inferGroupColorCode(rows);
-  const code = detected || "BK";
+  const fallback = fallbackColor === "WH" ? "WH" : "BK";
+  const code = detected || fallback;
   return { code, label: "", sourceMatched: true };
 }
 
-function expandRowsToTargetSizes(rows) {
+function expandRowsToTargetSizes(rows, fallbackColor) {
   const sizeKey = detectSizeKey(rows);
   if (!sizeKey) {
-    const colorGroup = fallbackColorGroup(rows);
+    const colorGroup = fallbackColorGroup(rows, fallbackColor);
     const expanded = [];
     for (const size of TARGET_SIZES) {
       const next = { ...rows[0] };
@@ -300,10 +301,10 @@ function expandRowsToTargetSizes(rows) {
     }
     if (!colorGroups.length) {
       otherIsColor = false;
-      colorGroups = [fallbackColorGroup(rows)];
+      colorGroups = [fallbackColorGroup(rows, fallbackColor)];
     }
   } else {
-    colorGroups = [fallbackColorGroup(rows)];
+    colorGroups = [fallbackColorGroup(rows, fallbackColor)];
   }
 
   const expanded = [];
@@ -453,6 +454,7 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
     const firstRow = group.rows[0];
     const choice = choices[productNo] || {};
     const side = choice.side === "PR" ? "PR" : "P";
+    const fallbackColor = choice.fallbackColor === "WH" ? "WH" : "BK";
     const originalImages = sourceImages(firstRow);
     if (!originalImages[0]) {
       throw new Error(`商品 ${productNo} 缺少产品图 1`);
@@ -463,7 +465,7 @@ function outputRowsFromGroups(groups, choices, assets, skuDate) {
       text(firstRow[SOURCE_COLUMNS.long_description]) || text(firstRow[SOURCE_COLUMNS.short_description]),
       assets.detailUrls,
     );
-    const skuRows = expandRowsToTargetSizes(group.rows);
+    const skuRows = expandRowsToTargetSizes(group.rows, fallbackColor);
 
     reviewRows.push({
       product_no: productNo,
